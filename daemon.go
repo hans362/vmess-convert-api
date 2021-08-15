@@ -36,7 +36,13 @@ func main() {
 		lk, err := vmess.ParseVmess(data)
 		response := []byte("[]")
 		if err != nil {
-			response = []byte("[]")
+			links := VMess{
+				V2RayN:       "error",
+				ShadowRocket: "error",
+				Quantumult:   "error",
+			}
+			result, _ := json.Marshal(links)
+			response = []byte(string(result))
 		} else {
 			links := VMess{
 				V2RayN:       lk.LinkStr("ng"),
