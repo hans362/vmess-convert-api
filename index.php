@@ -3,7 +3,7 @@
 function handler($src, $dest, $format) {
     if (
         empty($src) ||
-        type($src) == 'unknown' ||
+        type($src) == 'error' ||
         !in_array($dest, ['ng', 'rk', 'quan']) ||
         !in_array($format, ['json', 'plain'])
     ) {
@@ -13,8 +13,9 @@ function handler($src, $dest, $format) {
     }
     switch (type($src)) {
         case 'link':
+            $result = linkconv($src, $dest);
             return [
-                'status' => 200,
+                'status' => $result == 'error' ? 400 : 200,
                 'headers' => [
                     'content-type' =>
                         $format == 'json'
@@ -23,14 +24,30 @@ function handler($src, $dest, $format) {
                 ],
                 'body' =>
                     $format == 'json'
-                        ? json_encode(['result' => linkconv($src, $dest)])
-                        : linkconv($src, $dest),
+                        ? json_encode(['result' => $result])
+                        : $result,
             ];
             break;
         case 'sub':
-            subconv($src, $dest);
+            $result = subconv($src, $dest);
+            return [
+                'status' => $result == 'error' ? 400 : 200,
+                'headers' => [
+                    'content-type' =>
+                        $format == 'json'
+                            ? 'application/json'
+                            : 'text/plain; charset=utf-8',
+                ],
+                'body' =>
+                    $format == 'json'
+                        ? json_encode(['result' => $result])
+                        : $result,
+            ];
             break;
         default:
+            return [
+                'status' => 400,
+            ];
             break;
     }
 }
@@ -41,16 +58,24 @@ function type($src) {
     } elseif (strpos($src, 'http') === 0 || strpos($src, 'https') === 0) {
         return 'sub';
     } else {
-        return 'unknown';
+        return 'error';
     }
 }
 
 function socket($msg) {
-    $socket = socket_create(AF_UNIX, SOCK_STREAM, 0);
-    socket_connect($socket, '/tmp/vmess_convert_api.sock');
-    socket_send($socket, $msg, strlen($msg), 0);
-    $response = socket_read($socket, 1024);
-    socket_close($socket);
+    $socket = @socket_create(AF_UNIX, SOCK_STREAM, 0);
+    @socket_connect($socket, '/tmp/vmess_convert_api.sock');
+    @socket_send($socket, $msg, strlen($msg), 0);
+    $response = @socket_read($socket, 1024);
+    @socket_close($socket);
+    if ($response === false) {
+        echo "Warning: Failed to connect to daemon! Is the daemon running?\n";
+        return json_encode([
+            'v2rayn' => 'error',
+            'shadowrocket' => 'error',
+            'quantumult' => 'error',
+        ]);
+    }
     return $response;
 }
 
@@ -73,6 +98,26 @@ function linkconv($src, $dest) {
 }
 
 function subconv($src, $dest) {
+    $sub = @file_get_contents($src);
+    $sub = explode("\n", base64_decode($sub));
+    if (empty($sub)) {
+        return 'error';
+    }
+    $result = '';
+    foreach ($sub as $k) {
+        if (type($k) != 'link') {
+            continue;
+        }
+        $link = linkconv($k, $dest);
+        if ($link == 'error') {
+            continue;
+        }
+        $result = $result . $link . "\n";
+    }
+    if (empty($result)) {
+        return 'error';
+    }
+    return base64_encode($result);
 }
 
 function main() {
